@@ -1,55 +1,112 @@
 import numpy as np
+import torch
+
+def convert_depth_frame_to_pointcloud_t(depth_image, K ):
+  # This function was taken from the interwebs, modified
+  # to work with ROS intrinsic matrix
+  """
+  Convert the depthmap to a 3D point cloud
+  Parameters:
+  -----------
+  depth_frame 	  : 2D ndarray, The depth_frame containing the depth map
+  camera_intrinsics : 3x3 ndarray, The intrinsic values of the imager 
+            in whose coordinate system the depth_frame is 
+            computed
+  Return:
+  ----------
+  x : array, The x values of the pointcloud in meters
+  y : array, The y values of the pointcloud in meters
+  z : array, The z values of the pointcloud in meters
+  """
+	
+  [height, width] = depth_image.shape
+  fx = K[0,0] 
+  fy = K[1,1] 
+  ppx = K[0,2]
+  ppy = K[1,2]
+
+  ny = torch.linspace(0, height-1, height).float()
+  nx = torch.linspace(0,width-1,width).float()
+
+  v,u = torch.meshgrid(nx, ny, indexing='xy')  # input xy = vu
+
+  x_over_d = (v.flatten() - ppx)/fx
+  y_over_d = (u.flatten() - ppy)/fy
+
+  z = depth_image.float().flatten() # / 1000
+  x = torch.multiply(x_over_d,z)
+  y = torch.multiply(y_over_d,z)
+
+  # Filter
+  xf = x[torch.nonzero(z)][:,0]
+  yf = y[torch.nonzero(z)][:,0]
+  zf = z[torch.nonzero(z)][:,0]
+
+  return xf, yf, zf
 
 def convert_depth_frame_to_pointcloud(depth_image, K ):
-	# This function was taken from the interwebs, modified
-	# to work with ROS intrinsic matrix
-	"""
-	Convert the depthmap to a 3D point cloud
-	Parameters:
-	-----------
-	depth_frame 	  : 2D ndarray, The depth_frame containing the depth map
-	camera_intrinsics : 3x3 ndarray, The intrinsic values of the imager 
-						in whose coordinate system the depth_frame is 
-						computed
-	Return:
-	----------
-	x : array, The x values of the pointcloud in meters
-	y : array, The y values of the pointcloud in meters
-	z : array, The z values of the pointcloud in meters
-	"""
-	
-	[height, width] = depth_image.shape
-	fx = K[0,0] 
-	fy = K[1,1] 
-	ppx = K[0,2]
-	ppy = K[1,2]
+  # This function was taken from the interwebs, modified
+  # to work with ROS intrinsic matrix
+  """
+  Convert the depthmap to a 3D point cloud
+  Parameters:
+  -----------
+  depth_frame 	  : 2D ndarray, The depth_frame containing the depth map
+  camera_intrinsics : 3x3 ndarray, The intrinsic values of the imager 
+            in whose coordinate system the depth_frame is 
+            computed
+  Return:
+  ----------
+  x : array, The x values of the pointcloud in meters
+  y : array, The y values of the pointcloud in meters
+  z : array, The z values of the pointcloud in meters
+  """
+  if torch.is_tensor(depth_image): return convert_depth_frame_to_pointcloud_t(depth_image, K)
 
-	nx = np.linspace(0, width-1, width)
-	ny = np.linspace(0, height-1, height)
-	
-	u, v = np.meshgrid(nx, ny)
-	x = (u.flatten() - ppx)/fx
-	y = (v.flatten() - ppy)/fy
-	
-	z = depth_image.flatten() # / 1000
-	x = np.multiply(x,z)
-	y = np.multiply(y,z)
+  [height, width] = depth_image.shape
+  fx = K[0,0] 
+  fy = K[1,1] 
+  ppx = K[0,2]
+  ppy = K[1,2]
 
-	x = x[np.nonzero(z)]
-	y = y[np.nonzero(z)]
-	z = z[np.nonzero(z)]
+  nx = np.linspace(0, width-1, width)
+  ny = np.linspace(0, height-1, height)
 
-	return x, y, z
+  v,u = np.meshgrid(nx, ny)
+  x = (v.flatten() - ppx)/fx
+  y = (u.flatten() - ppy)/fy
+
+  z = depth_image.flatten() # / 1000
+  x = np.multiply(x,z)
+  y = np.multiply(y,z)
+
+  x = x[np.nonzero(z)]
+  y = y[np.nonzero(z)]
+  z = z[np.nonzero(z)]
+
+  return x, y, z
+
+def apply_homogenous_transform_to_points_t(tf, pts):
+  ''' Given a homogenous tf matrix and a 3xN Torch tensor
+  of points, apply the tf to the points to produce
+  a new 3xN array of points.
+  :param tf: 4x4 torch tensor of matching dtype to pts
+  :param pts: 3xN torch tensor of matching dtype to tf
+  :return: 3xN torch tensor of matching dtype to tf and pts'''
+  return ((tf[:3, :3].mm(pts).T) + tf[:3, 3]).T
+
 
 def apply_homogenous_transform_to_points(tf, pts):
-    ''' Given a homogenous tf matrix and a 3xN NP array
-    of points, apply the tf to the points to produce
-    a new 3xN array of points.
-    :param tf: 4x4 numpy array of matching dtype to pts
-    :param pts: 3xN numpy array of matching dtype to tf
-    :return: 3xN numpy array of matching dtype to tf and pts'''
-    return ((tf[:3, :3].dot(pts).T) + tf[:3, 3]).T
-
+  ''' Given a homogenous tf matrix and a 3xN NP array
+  of points, apply the tf to the points to produce
+  a new 3xN array of points.
+  :param tf: 4x4 numpy array of matching dtype to pts
+  :param pts: 3xN numpy array of matching dtype to tf
+  :return: 3xN numpy array of matching dtype to tf and pts'''
+  if torch.is_tensor(pts): 
+    return apply_homogenous_transform_to_points_t(tf,pts)
+  return ((tf[:3, :3].dot(pts).T) + tf[:3, 3]).T
+  
 def convert_depth_pixel_to_metric_coordinate(depth, pixel_x, pixel_y, K):
 	# This function was taken from the interwebs
 	"""
